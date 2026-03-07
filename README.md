@@ -9,10 +9,12 @@ A BepInEx 6 plugin that enables native ultrawide support for Homura Hime.
 * **Resolution Override**: Includes a config file to manually set custom resolutions.
 
 ## Installation
-1. Install [BepInEx 6](https://builds.bepinex.dev/projects/bepinex_be).
+1. Extract the latest version of [BepInEx 6](https://builds.bepinex.dev/projects/bepinex_be) into the game's root directory where the executable is located `ie. (...steamapps\common\Homura Hime\)`
 2. Download the latest release of this mod.
-3. Extract the `BepInEx` folder from the zip into your game's root directory.
+3. Extract the `BepInEx` folder from the zip into your game's root directory where the executable is located `(ie. ...steamapps\common\Homura Hime\)`
 4. Run the game!
+
+1. Alternatively, download the latest release of the mod that contains BepInEx and extract into the game's root directory where the executable is located `(ie. ...steamapps\common\Homura Hime\)`
 
 ## Configuration
 After the first launch, a config file will be generated at `...steamapps\common\Homura Hime\BepInEx\config\himeuw.cfg`. You can edit this file to disable Auto-Detect and set a manual resolution.
