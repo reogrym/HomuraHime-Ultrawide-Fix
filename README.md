@@ -15,4 +15,4 @@ A BepInEx 6 plugin that enables native ultrawide support for Homura Hime.
 4. Run the game!
 
 ## Configuration
-After the first launch, a config file will be generated at `BepInEx/config/com.yourname.ultrawidefix.cfg`. You can edit this file to disable Auto-Detect and set a manual resolution.
+After the first launch, a config file will be generated at `...steamapps\common\Homura Hime\BepInEx\config\himeuw`. You can edit this file to disable Auto-Detect and set a manual resolution.
