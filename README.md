@@ -3,7 +3,7 @@
 A BepInEx 6 plugin that enables native ultrawide support for Homura Hime.
 
 ## Features
-* **This has only been tested on the tutorial level and on a 21:9 monitor running the game at 3440x1440 against the Steam version of the game.**
+* **Tested on the Steam version of the game on a 21:9 monitor running the game at 3440x1440.**
 * **Auto-Resolution**: Automatically detects and applies your monitor's native resolution.
 * **UI Scaling Fix**: Prevents character portraits from stretching.
 * **Text Box Slimming**: Constraints the dialogue box to a 16:9 area for better readability.
