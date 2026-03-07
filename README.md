@@ -4,7 +4,7 @@ A BepInEx 6 plugin that enables native ultrawide support for Homura Hime.
 
 ## Features
 * **Auto-Resolution**: Automatically detects and applies your monitor's native resolution.
-* **UI Scaling Fix**: Prevents character portraits (Ann) from stretching.
+* **UI Scaling Fix**: Prevents character portraits from stretching.
 * **Text Box Slimming**: Constraints the dialogue box to a 16:9 area for better readability.
 * **Resolution Override**: Includes a config file to manually set custom resolutions.
 
