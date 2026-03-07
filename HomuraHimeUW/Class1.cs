@@ -61,70 +61,95 @@ namespace UltrawideFixMod
     // This class contains all the logic you previously injected via dnSpy
     public class UltrawidePatches
     {
+        // --- SMART CACHE VARIABLES ---
+        private static object lastGraphicManager = null;
+        private static RectTransform cachedCharRect = null;
+
+        private static UnityEngine.GameObject lastMainGameObj = null;
+        private static UnityEngine.UI.AspectRatioFitter cachedFitter = null;
+
         // 1. Replaces the UnityEngine.UI.dll edit
-        [HarmonyPatch(typeof(CanvasScaler), "HandleScaleWithScreenSize")]
+        [HarmonyPatch(typeof(UnityEngine.UI.CanvasScaler), "HandleScaleWithScreenSize")]
         [HarmonyPrefix]
-        public static void PreFixCanvasScaler(CanvasScaler __instance)
+        public static void PreFixCanvasScaler(UnityEngine.UI.CanvasScaler __instance)
         {
             __instance.matchWidthOrHeight = 1f;
         }
 
         // 2. Replaces the AdvUguiManager edit
-        // CHANGED: We now hook into "Update" because LateUpdate doesn't exist in the vanilla file!
         [HarmonyPatch(typeof(Utage.AdvUguiManager), "Update")]
         [HarmonyPostfix]
         public static void FixUIElements(Utage.AdvUguiManager __instance)
         {
             float targetAspect = 1.7777778f;
-            float currentAspect = (float)Screen.width / (float)Screen.height;
+            float currentAspect = (float)UnityEngine.Screen.width / (float)UnityEngine.Screen.height;
             float scaleFactor = targetAspect / currentAspect;
 
             // SLIM THE TEXT BOX 
             if (__instance.MessageWindow != null)
             {
-                RectTransform msgRect = __instance.MessageWindow.GetComponent<RectTransform>();
-                Vector3 targetScale = new Vector3(scaleFactor, 1f, 1f);
+                // Using 'as RectTransform' is instant and avoids the expensive GetComponent lag.
+                // It ensures we ALWAYS target the active text box in the current scene.
+                UnityEngine.RectTransform msgRect = __instance.MessageWindow.transform as UnityEngine.RectTransform;
 
-                if (msgRect != null && Vector3.Distance(msgRect.localScale, targetScale) > 0.005f)
+                if (msgRect != null && msgRect.localScale.x != scaleFactor)
                 {
-                    msgRect.localScale = targetScale;
+                    msgRect.localScale = new UnityEngine.Vector3(scaleFactor, 1f, 1f);
                 }
             }
 
-            // SLIM THE PORTRAITS (Targeting the Character folder)
+            // SLIM THE PORTRAITS
             if (__instance.Engine != null && __instance.Engine.GraphicManager != null)
             {
-                Transform charFolder = __instance.Engine.GraphicManager.transform.Find("Characters");
-                if (charFolder == null) charFolder = __instance.Engine.GraphicManager.transform;
+                var currentGM = __instance.Engine.GraphicManager;
 
-                RectTransform rect = charFolder.GetComponent<RectTransform>();
-                if (rect != null)
+                // If the game loaded a new scene/manager, or our cache broke, we refresh it once
+                if (lastGraphicManager != currentGM || cachedCharRect == null)
                 {
-                    if (rect.localScale.x != scaleFactor)
-                    {
-                        rect.localScale = new Vector3(scaleFactor, 1f, 1f);
-                    }
+                    lastGraphicManager = currentGM;
+                    UnityEngine.Transform charFolder = currentGM.transform.Find("Characters");
+                    if (charFolder == null) charFolder = currentGM.transform;
+
+                    cachedCharRect = charFolder as UnityEngine.RectTransform;
+                }
+
+                if (cachedCharRect != null && cachedCharRect.localScale.x != scaleFactor)
+                {
+                    cachedCharRect.localScale = new UnityEngine.Vector3(scaleFactor, 1f, 1f);
                 }
             }
         }
 
         // 3. Replaces the UtageUguiMainGame portrait edit
-        // This one stays as LateUpdate because it actually exists natively here.
         [HarmonyPatch(typeof(UtageUguiMainGame), "LateUpdate")]
         [HarmonyPostfix]
         public static void FixMainGame(UtageUguiMainGame __instance)
         {
             if (__instance.Engine != null && __instance.Engine.GraphicManager != null)
             {
-                AspectRatioFitter aspect = __instance.Engine.GraphicManager.gameObject.GetComponent<AspectRatioFitter>();
-                if (aspect == null)
+                UnityEngine.GameObject currentObj = __instance.Engine.GraphicManager.gameObject;
+
+                // Smart cache to prevent running GetComponent/AddComponent every single frame
+                if (lastMainGameObj != currentObj || cachedFitter == null)
                 {
-                    aspect = __instance.Engine.GraphicManager.gameObject.AddComponent<AspectRatioFitter>();
-                    aspect.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
-                    aspect.aspectRatio = 1.7777778f;
+                    lastMainGameObj = currentObj;
+                    cachedFitter = currentObj.GetComponent<UnityEngine.UI.AspectRatioFitter>();
+
+                    if (cachedFitter == null)
+                    {
+                        cachedFitter = currentObj.AddComponent<UnityEngine.UI.AspectRatioFitter>();
+                    }
+                }
+
+                if (cachedFitter != null)
+                {
+                    cachedFitter.aspectMode = UnityEngine.UI.AspectRatioFitter.AspectMode.FitInParent;
+                    cachedFitter.aspectRatio = 1.7777778f;
                 }
             }
         }
+
+        // 4. THE RESOLUTION INTERCEPTORS
         [HarmonyPatch(typeof(UnityEngine.Screen), "SetResolution", new System.Type[] { typeof(int), typeof(int), typeof(bool) })]
         [HarmonyPrefix]
         public static void InterceptLegacyResolution(ref int width, ref int height)
@@ -133,7 +158,6 @@ namespace UltrawideFixMod
             height = UltrawidePlugin.AutoResolution.Value ? UnityEngine.Display.main.systemHeight : UltrawidePlugin.ResHeight.Value;
         }
 
-        // Intercepts modern resolution commands
         [HarmonyPatch(typeof(UnityEngine.Screen), "SetResolution", new System.Type[] { typeof(int), typeof(int), typeof(UnityEngine.FullScreenMode) })]
         [HarmonyPrefix]
         public static void InterceptModernResolution(ref int width, ref int height)
