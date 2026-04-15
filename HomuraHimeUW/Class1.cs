@@ -4,21 +4,20 @@ using BepInEx.Unity.Mono;
 using HarmonyLib;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace UltrawideFixMod
 {
-    [BepInPlugin("himeuw", "Homura Hime Ultrawide Fix", "0.1.2")]
+    [BepInPlugin("himeuw", "Homura Hime Ultrawide Fix", "0.1.3")] // plugin GUID, name, version, hopefully the last version number I have to update for a while lol
     public class UltrawidePlugin : BaseUnityPlugin
     {
         public static ConfigEntry<bool> AutoResolution;
         public static ConfigEntry<int> ResWidth;
         public static ConfigEntry<int> ResHeight;
 
-        private static Utage.AdvUguiManager[] cachedAdvManagers = new Utage.AdvUguiManager[0];
-        private static UtageUguiMainGame[] cachedMainGames = new UtageUguiMainGame[0];
-
-        // This list will now safely hold active AND hidden text boxes
+        private static List<Utage.AdvUguiManager> allAdvManagers = new List<Utage.AdvUguiManager>();
+        private static List<UtageUguiMainGame> allMainGames = new List<UtageUguiMainGame>();
         private static List<Utage.AdvUguiMessageWindow> allMsgWindows = new List<Utage.AdvUguiMessageWindow>();
         private static Dictionary<int, List<Transform>> textCaches = new Dictionary<int, List<Transform>>();
 
@@ -29,13 +28,13 @@ namespace UltrawideFixMod
             ResHeight = Config.Bind("Resolution", "ManualHeight", 1440, "Manual height");
 
             Harmony.CreateAndPatchAll(typeof(ResolutionPatches));
-            Logger.LogInfo("Ultrawide Fix loaded successfully!");
+
+            SceneManager.sceneLoaded += OnSceneLoaded;
         }
 
         private void Start()
         {
             StartCoroutine(ApplyResolutionDelayed());
-            StartCoroutine(SlowSearchLoop());
             StartCoroutine(FastUpdateLoop());
         }
 
@@ -46,158 +45,160 @@ namespace UltrawideFixMod
             else Screen.SetResolution(ResWidth.Value, ResHeight.Value, FullScreenMode.FullScreenWindow);
         }
 
-        // --- LOOP 1: THE SLOW SEARCHER (Now grabs hidden objects to prevent popping) ---
-        private System.Collections.IEnumerator SlowSearchLoop()
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            WaitForSecondsRealtime wait = new WaitForSecondsRealtime(0.5f);
-            while (true)
+            float targetAspect = 1.7777778f;
+
+            // Apply HUD Pillarbox once per scene because the game doesn't do it for us and it causes scaling issues with the UI otherwise
+            CanvasScaler[] scalers = FindObjectsOfType<CanvasScaler>();
+            foreach (CanvasScaler scaler in scalers)
             {
-                float targetAspect = 1.7777778f;
+                if (scaler.matchWidthOrHeight != 1f) scaler.matchWidthOrHeight = 1f;
 
-                // 1. HUD Pillarbox
-                CanvasScaler[] scalers = FindObjectsOfType<CanvasScaler>();
-                foreach (CanvasScaler scaler in scalers)
+                if (scaler.GetComponent<Canvas>().isRootCanvas)
                 {
-                    if (scaler.matchWidthOrHeight != 1f) scaler.matchWidthOrHeight = 1f;
-
-                    if (scaler.GetComponent<Canvas>().isRootCanvas)
+                    foreach (Transform childTransform in scaler.transform)
                     {
-                        foreach (Transform childTransform in scaler.transform)
+                        RectTransform child = childTransform as RectTransform;
+                        if (child == null) continue;
+
+                        string name = child.name.ToLower();
+                        if (name.Contains("utage") || name.Contains("fade") || name.Contains("bg") || name.Contains("background") || name.Contains("mask")) continue;
+
+                        if (child.anchorMin == Vector2.zero && child.anchorMax == Vector2.one)
                         {
-                            RectTransform child = childTransform as RectTransform;
-                            if (child == null) continue;
-
-                            string name = child.name.ToLower();
-                            if (name.Contains("utage") || name.Contains("fade") || name.Contains("bg") || name.Contains("background") || name.Contains("mask")) continue;
-
-                            if (child.anchorMin == Vector2.zero && child.anchorMax == Vector2.one)
+                            AspectRatioFitter fitter = child.GetComponent<AspectRatioFitter>();
+                            if (fitter == null)
                             {
-                                AspectRatioFitter fitter = child.GetComponent<AspectRatioFitter>();
-                                if (fitter == null)
-                                {
-                                    fitter = child.gameObject.AddComponent<AspectRatioFitter>();
-                                    fitter.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
-                                    fitter.aspectRatio = targetAspect;
-                                }
+                                fitter = child.gameObject.AddComponent<AspectRatioFitter>();
+                                fitter.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+                                fitter.aspectRatio = targetAspect;
                             }
                         }
                     }
                 }
+            }
 
-                // 2. Refresh the root UI managers
-                cachedAdvManagers = FindObjectsOfType<Utage.AdvUguiManager>();
-                cachedMainGames = FindObjectsOfType<UtageUguiMainGame>();
+            // Refresh UI managers and text box caches for the FastUpdateLoop to use, we have to do this every scene because the game creates/destroys UI managers instead of reusing them
+            allAdvManagers.Clear();
+            allAdvManagers.AddRange(FindObjectsOfType<Utage.AdvUguiManager>());
 
-                // 3. Find ALL text boxes safely (the 'true' includes hidden ones waiting to pop in!)
-                allMsgWindows.Clear();
-                foreach (var manager in cachedAdvManagers)
-                {
-                    if (manager != null) allMsgWindows.AddRange(manager.GetComponentsInChildren<Utage.AdvUguiMessageWindow>(true));
-                }
-                foreach (var mainGame in cachedMainGames)
-                {
-                    if (mainGame != null) allMsgWindows.AddRange(mainGame.GetComponentsInChildren<Utage.AdvUguiMessageWindow>(true));
-                }
+            allMainGames.Clear();
+            allMainGames.AddRange(FindObjectsOfType<UtageUguiMainGame>());
 
-                // 4. Cache the fonts for the Inverse Scale
-                foreach (var window in allMsgWindows)
+            // Find all text boxes in the scene to apply scaling
+            allMsgWindows.Clear();
+            foreach (var manager in allAdvManagers)
+            {
+                if (manager != null) allMsgWindows.AddRange(manager.GetComponentsInChildren<Utage.AdvUguiMessageWindow>(true));
+            }
+            foreach (var mainGame in allMainGames)
+            {
+                if (mainGame != null) allMsgWindows.AddRange(mainGame.GetComponentsInChildren<Utage.AdvUguiMessageWindow>(true));
+            }
+
+            // Cache fonts to avoid doing GetComponentsInChildren every frame which causes stuttering when too many text boxes are on screen
+            textCaches.Clear();
+            foreach (var window in allMsgWindows)
+            {
+                if (window == null) continue;
+                int id = window.GetInstanceID();
+                if (!textCaches.ContainsKey(id))
                 {
-                    if (window == null) continue;
-                    int id = window.GetInstanceID();
-                    if (!textCaches.ContainsKey(id))
+                    List<Transform> foundTexts = new List<Transform>();
+                    foreach (var graphic in window.GetComponentsInChildren<Graphic>(true))
                     {
-                        List<Transform> foundTexts = new List<Transform>();
-                        foreach (var graphic in window.GetComponentsInChildren<Graphic>(true))
+                        string typeName = graphic.GetType().Name;
+                        if (typeName.Contains("Text") || typeName.Contains("TextMeshPro"))
                         {
-                            string typeName = graphic.GetType().Name;
-                            if (typeName.Contains("Text") || typeName.Contains("TextMeshPro"))
-                            {
-                                foundTexts.Add(graphic.transform);
-                            }
+                            foundTexts.Add(graphic.transform);
                         }
-                        textCaches[id] = foundTexts;
                     }
+                    textCaches[id] = foundTexts;
                 }
-
-                yield return wait;
             }
         }
 
-        // --- LOOP 2: THE FAST UPDATER ---
         private System.Collections.IEnumerator FastUpdateLoop()
         {
             while (true)
             {
-                float targetAspect = 1.7777778f;
-                float currentAspect = (float)Screen.width / (float)Screen.height;
-                float scaleFactor = targetAspect / currentAspect;
-                float inverseScale = 1f / scaleFactor;
-
-                // 1. Smoothly fix Text Boxes and Cut-Ins
-                foreach (var window in allMsgWindows)
+                try
                 {
-                    if (window != null)
+                    float targetAspect = 1.7777778f;
+                    float currentAspect = (float)Screen.width / (float)Screen.height;
+                    float scaleFactor = targetAspect / currentAspect;
+                    float inverseScale = 1f / scaleFactor;
+
+                    // Fix for Text Boxes and Cut-Ins
+                    foreach (var window in allMsgWindows)
                     {
-                        Transform msgT = window.transform;
-
-                        // Links the width scale to whatever the game is doing with the height scale
-                        float currentY = msgT.localScale.y;
-                        float targetX = currentY * scaleFactor;
-
-                        if (Mathf.Abs(msgT.localScale.x - targetX) > 0.005f)
+                        if (window != null && window.gameObject != null && window.gameObject.activeInHierarchy)
                         {
-                            msgT.localScale = new Vector3(targetX, currentY, msgT.localScale.z);
-                        }
+                            Transform msgT = window.transform;
 
-                        int id = window.GetInstanceID();
-                        if (textCaches.ContainsKey(id))
-                        {
-                            foreach (var txtTransform in textCaches[id])
+                            float currentY = msgT.localScale.y;
+                            float targetX = currentY * scaleFactor;
+
+                            if (Mathf.Abs(msgT.localScale.x - targetX) > 0.005f)
                             {
-                                if (txtTransform != null)
-                                {
-                                    float txtY = txtTransform.localScale.y;
-                                    float targetTxtX = txtY * inverseScale;
+                                msgT.localScale = new Vector3(targetX, currentY, msgT.localScale.z);
+                            }
 
-                                    if (Mathf.Abs(txtTransform.localScale.x - targetTxtX) > 0.005f)
+                            int id = window.GetInstanceID();
+                            if (textCaches.ContainsKey(id))
+                            {
+                                foreach (var txtTransform in textCaches[id])
+                                {
+                                    if (txtTransform != null)
                                     {
-                                        txtTransform.localScale = new Vector3(targetTxtX, txtY, txtTransform.localScale.z);
+                                        float txtY = txtTransform.localScale.y;
+                                        float targetTxtX = txtY * inverseScale;
+
+                                        if (Mathf.Abs(txtTransform.localScale.x - targetTxtX) > 0.005f)
+                                        {
+                                            txtTransform.localScale = new Vector3(targetTxtX, txtY, txtTransform.localScale.z);
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                // 2. Smoothly fix Visual Novel Portraits
-                foreach (var manager in cachedAdvManagers)
-                {
-                    if (manager != null && manager.Engine != null && manager.Engine.GraphicManager != null)
+                    // Fix VN (Utage) portraits and character sprites
+                    foreach (var manager in allAdvManagers)
                     {
-                        Transform charFolder = manager.Engine.GraphicManager.transform.Find("Characters");
-                        if (charFolder == null) charFolder = manager.Engine.GraphicManager.transform;
+                        if (manager != null && manager.Engine != null && manager.Engine.GraphicManager != null && manager.gameObject != null && manager.gameObject.activeInHierarchy)
+                        {
+                            Transform charFolder = manager.Engine.GraphicManager.transform.Find("Characters");
+                            if (charFolder == null) charFolder = manager.Engine.GraphicManager.transform;
 
-                        float currentY = charFolder.localScale.y;
-                        float targetX = currentY * scaleFactor;
+                            float currentY = charFolder.localScale.y;
+                            float targetX = currentY * scaleFactor;
 
-                        if (Mathf.Abs(charFolder.localScale.x - targetX) > 0.005f)
-                            charFolder.localScale = new Vector3(targetX, currentY, charFolder.localScale.z);
+                            if (Mathf.Abs(charFolder.localScale.x - targetX) > 0.005f)
+                                charFolder.localScale = new Vector3(targetX, currentY, charFolder.localScale.z);
+                        }
+                    }
+
+                    // Fix dojo portraits
+                    foreach (var mainGame in allMainGames)
+                    {
+                        if (mainGame != null && mainGame.Engine != null && mainGame.Engine.GraphicManager != null && mainGame.gameObject != null && mainGame.gameObject.activeInHierarchy)
+                        {
+                            Transform gmTransform = mainGame.Engine.GraphicManager.transform;
+
+                            float currentY = gmTransform.localScale.y;
+                            float targetX = currentY * scaleFactor;
+
+                            if (Mathf.Abs(gmTransform.localScale.x - targetX) > 0.005f)
+                                gmTransform.localScale = new Vector3(targetX, currentY, gmTransform.localScale.z);
+                        }
                     }
                 }
-
-                // 3. Smoothly fix Dojo Portraits
-                foreach (var mainGame in cachedMainGames)
+                catch (System.Exception)
                 {
-                    if (mainGame != null && mainGame.Engine != null && mainGame.Engine.GraphicManager != null)
-                    {
-                        Transform gmTransform = mainGame.Engine.GraphicManager.transform;
-
-                        float currentY = gmTransform.localScale.y;
-                        float targetX = currentY * scaleFactor;
-
-                        if (Mathf.Abs(gmTransform.localScale.x - targetX) > 0.005f)
-                            gmTransform.localScale = new Vector3(targetX, currentY, gmTransform.localScale.z);
-                    }
+                    // Silent error handling
                 }
 
                 yield return null;
@@ -205,7 +206,6 @@ namespace UltrawideFixMod
         }
     }
 
-    // --- RESOLUTION ENFORCER ONLY ---
     public class ResolutionPatches
     {
         [HarmonyPatch(typeof(UnityEngine.Screen), "SetResolution", new System.Type[] { typeof(int), typeof(int), typeof(bool) })]
